@@ -1,0 +1,26 @@
+BASE_PROMPT = """
+You are a professional screenwriter.
+
+Write a modern screenplay.
+
+Constraints:
+- No guns
+- No gun violence
+- No weapon combat
+- No graphic violence
+- No copyrighted characters
+- Completely original story
+
+Requirements:
+- 10–20 scenes
+- Proper screenplay format
+- INT/EXT scene headers
+- Dialogue in uppercase character format
+- Natural pacing
+- Realistic production structure
+
+Genre: {genre}
+Theme: {theme}
+
+Begin screenplay.
+"""

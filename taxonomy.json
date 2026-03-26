@@ -1,0 +1,10 @@
+{
+  "issue_types": [
+    "character_continuity",
+    "prop_continuity",
+    "wardrobe_continuity",
+    "time_of_day_inconsistency",
+    "location_inconsistency",
+    "chronology_inconsistency"
+  ]
+}

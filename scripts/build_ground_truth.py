@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Uncomment this line in script directory
+#from src.evaluation.build_ground_truth import main
 
 PROJECT_ROOT = Path(".")
 RAW_LABELED_DIR = PROJECT_ROOT / "datasets" / "synthetic_errors"

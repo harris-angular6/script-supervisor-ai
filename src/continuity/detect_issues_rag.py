@@ -7,6 +7,10 @@ USE_RAG = True
 RAG_CONFIDENCE_THRESHOLD = 0.60
 MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
 
+RULE_BASED_ERROR = 0
+RAG_LLM_ERROR = 1
+LLM_FINETUNED_ERROR = 2
+
 PROJECT_ROOT = Path(".")
 INPUT_DIR = PROJECT_ROOT / "datasets" / "scenes_enriched_error"
 OUTPUT_DIR = PROJECT_ROOT / "datasets" / "issues_error_rag"
@@ -15,6 +19,18 @@ INPUT_FILES = [
     "train_error_scenes_enriched.jsonl",
     #"val_error_scenes_enriched.jsonl",
     #"test_error_scenes_enriched.jsonl",
+]
+
+OUTPUT_FILES_RAG_REVIEW = [
+    "train_error_issues_rag_review.jsonl",
+    #"val_error_issues_rag_review.jsonl",
+    #"test_error_scenes_rag_review.jsonl",
+]
+
+OUTPUT_FILES = [
+    "train_error_issues_rag.jsonl",
+    #"val_error_issues_rag.jsonl",
+    #"test_error_scenes_rag.jsonl",
 ]
 
 
@@ -88,9 +104,10 @@ def scene_link_strength(prev_scene: Dict[str, Any], curr_scene: Dict[str, Any]) 
 
 
 def make_issue(
+    current_scene,
     issue_counter: int,
     script_id: str,
-    scene_id: str,
+    scene_id: str,    
     related_scene_id: Optional[str],
     issue_type: str,
     severity: str,
@@ -98,7 +115,57 @@ def make_issue(
     evidence: List[str],
     confidence: float,
 ) -> Dict[str, Any]:
+
     return {
+        "continuity_issue_id": f"{script_id}_ISSUE_{issue_counter:05d}",
+        "script_id": current_scene["script_id"],
+        "has_continuity_error": True,        
+
+        "detectors": {
+            "rule_based": {
+                "has_error": True,
+                "errors": {
+                        "scene_id": current_scene["scene_id"],
+                        "scene_index": current_scene["scene_index"],
+                        "related_scene_id": related_scene_id,
+                        "issue_type": issue_type,
+                        "severity": severity,
+                        "description": description,
+                        "evidence": evidence,
+                        "confidence": round(confidence, 2),
+                }                
+            },
+            "rag_llm": {
+                "has_error": False,
+                "errors": None
+            },
+            "fine_tuned_llm": {
+                "has_error": False,
+                "errors": None
+            },
+        },
+
+        "final_merged_result": {
+            "has_error": True,
+            "issue_type": issue_type,
+            "severity": severity,
+            "description": description,
+            "evidence": evidence,
+            "confidence": round(confidence, 2),
+            "supporting_detectors": [
+                "rule_based_detector",
+            ]
+        }
+    }
+    
+    '''
+    return {
+        "script_id": script_id,
+        "current_scene_id": scene_id,
+        "scene_index": 
+        "has_continuity_error": True,
+        "error_source": RULE_BASED_ERROR,
+        
         "issue_id": f"{script_id}_ISS_{issue_counter:04d}",
         "script_id": script_id,
         "scene_id": scene_id,
@@ -109,6 +176,7 @@ def make_issue(
         "evidence": evidence,
         "confidence": round(confidence, 2),
     }
+    '''
 
 
 def detect_prop_continuity(
@@ -144,6 +212,7 @@ def detect_prop_continuity(
 
         issues.append(
             make_issue(
+                current_scene=curr_scene,
                 issue_counter=issue_counter,
                 script_id=curr_scene["script_id"],
                 scene_id=curr_scene["scene_id"],
@@ -196,6 +265,7 @@ def detect_wardrobe_continuity(
 
             issues.append(
                 make_issue(
+                    current_scene=curr_scene,
                     issue_counter=issue_counter,
                     script_id=curr_scene["script_id"],
                     scene_id=curr_scene["scene_id"],
@@ -244,6 +314,7 @@ def detect_character_presence_continuity(
 
         issues.append(
             make_issue(
+                current_scene=curr_scene,
                 issue_counter=issue_counter,
                 script_id=curr_scene["script_id"],
                 scene_id=curr_scene["scene_id"],
@@ -308,6 +379,7 @@ def detect_time_of_day_continuity(
 
     issues.append(
         make_issue(
+            current_scene=curr_scene,
             issue_counter=issue_counter,
             script_id=curr_scene["script_id"],
             scene_id=curr_scene["scene_id"],
@@ -375,6 +447,7 @@ def detect_location_chronology_continuity(
 
     issues.append(
         make_issue(
+            current_scene=curr_scene,
             issue_counter=issue_counter,
             script_id=curr_scene["script_id"],
             scene_id=curr_scene["scene_id"],
@@ -389,8 +462,7 @@ def detect_location_chronology_continuity(
     issue_counter += 1
 
     return issues, issue_counter
-
-
+    
 def detect_issues_for_script(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     issues: List[Dict[str, Any]] = []
     issue_counter = 1
@@ -428,6 +500,92 @@ def detect_issues_for_script(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any
 
     return issues
 
+def detect_issues_for_script_rag_llm_review(issues: List[Dict[str, Any]], rag_collection, rag_continuity_detector) -> List[Dict[str, Any]]:
+
+    #issues_review = List[Dict[str, Any]];
+    issues_review = []
+    
+    for i in range(0, len(issues)):
+        continuity_issue_id = issues[i]["continuity_issue_id"]
+
+        print("\nContinuity Issue Id: ", continuity_issue_id, "\n")
+        print("The issue: ", issues[i], "\n")
+
+        issue_review_rag_llm = issue_review_result_rag_llm(continuity_issue_id, issues, rag_collection, rag_continuity_detector)
+
+        if issue_review_rag_llm:
+            print("Issue Review Rag LLM: ", issue_review_rag_llm)
+            issues_review.extend(issue_review_rag_llm)
+
+    if issues_review:
+        return issues_review   
+    else:
+        return None
+
+def issue_review_result_rag_llm(continuity_issue_id, issues, rag_collection, rag_continuity_detector):
+
+    #current_scene = Dict[str, Any]
+    #related_scene = Dict[str, Any]
+
+    #print("Continuity Issue Id: ", continuity_issue_id)
+
+    current_scene = []
+    related_scene = []
+
+    current_scene_id = None
+    related_scene_id = None
+    
+    #for i, issue in enumerate(issues):
+    for issue in issues:
+        if issue["continuity_issue_id"] == continuity_issue_id:
+            current_scene_id = issue["detectors"]["rule_based"]["errors"]["scene_id"]
+            related_scene_id = issue["detectors"]["rule_based"]["errors"]["related_scene_id"]   
+            
+    #for scene in scenes:
+    #for i in range(len(rag_collection["ids"])):
+
+    resultCollection = rag_collection.get()
+
+    #print("Result Collection: ", resultCollection)
+
+    #print("Length of result Collection: ", len(resultCollection))
+    #print("Length of result Collection ids: ", len(resultCollection["ids"]))
+    #print("Length of resultCollection[ids][0]: ", len(resultCollection["ids"][0]))
+    #print("Value of resultCollection[ids]: ", resultCollection["ids"])
+    
+    for i in range(len(resultCollection["ids"])):
+        #print("Current Scene Id: ", current_scene_id)
+        #print("Scene Id in resultCollection: ", resultCollection["ids"][i])
+
+        if current_scene_id == resultCollection["ids"][i]:
+            print("Current Scene Id == resultCollection[ids][i]: ", current_scene_id, " == ", resultCollection["ids"][i])    
+        
+        if current_scene_id == resultCollection["ids"][i]:
+            current_scene = {
+                "scene_id": resultCollection["ids"][i],
+                "script_id": resultCollection["metadatas"][i]["script_id"],
+                "scene_index": resultCollection["metadatas"][i]["scene_index"],
+                "location": resultCollection["metadatas"][i]["location"],
+                "time_of_day": resultCollection["metadatas"][i]["time_of_day"],
+                "scene_text": resultCollection["documents"][i]
+            }
+        if related_scene_id == resultCollection["ids"][i]:
+            related_scene = {
+                "scene_id": resultCollection["ids"][i],
+                "script_id": resultCollection["metadatas"][i]["script_id"],
+                "scene_index": resultCollection["metadatas"][i]["scene_index"],
+                "location": resultCollection["metadatas"][i]["location"],
+                "time_of_day": resultCollection["metadatas"][i]["time_of_day"],
+                "scene_text": resultCollection["documents"][i]
+            }    
+
+    #print("Current scene in issue_review_result_rag_llm: ", current_scene)
+
+    if current_scene and related_scene:    
+        output = rag_continuity_detector.CheckContinuityWithLLM_Review(current_scene, related_scene, continuity_issue_id)
+        return output
+    else:
+        return None
 
 def process_file(input_path: Path, output_path: Path) -> None:
     rows = read_jsonl(input_path)
@@ -443,8 +601,29 @@ def process_file(input_path: Path, output_path: Path) -> None:
         if (i >= 10):
             break;       
 
-    # write_jsonl(output_path, all_issues)
+    write_jsonl(output_path, all_issues)
 
+def rule_based_error_rag_llm_review(input_path: Path, output_path: Path, rag_collection, rag_continuity_detector):
+    rows = read_jsonl(input_path)
+    grouped = group_by_script(rows)
+    
+    all_issues: List[Dict[str, Any]] = []
+
+    for i, (_, scenes) in enumerate(grouped.items()):
+        script_issues_rule_based = detect_issues_for_script(scenes)
+
+                                       
+        script_issues_rag_llm_review = detect_issues_for_script_rag_llm_review(script_issues_rule_based, rag_collection, rag_continuity_detector)
+
+        print("Script Issues: ", script_issues_rag_llm_review)
+      
+        if script_issues_rag_llm_review:
+            all_issues.extend(script_issues_rag_llm_review)
+        
+        if (i >= 10):
+            break;
+        
+    write_jsonl(output_path, all_issues)  
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -461,15 +640,94 @@ def main() -> None:
 
         process_file(input_path, output_path)
 
-        rag_continuity_detector = RagContinuityDetector(input_path, output_path, MODEL_NAME)
+        input_to_rag_rule = output_path
+        output_path_rag_review = OUTPUT_DIR / OUTPUT_FILES_RAG_REVIEW[0]       
+        all_rule_based_issues = read_jsonl(input_to_rag_rule)
+        #rag_continuity_detector = RagContinuityDetector(input_path, output_path, MODEL_NAME)
 
-        scenes_from_input_file = rag_continuity_detector.LoadScenes(input_path)
+        rag_review_continuity_detector_rule = RagContinuityDetector(input_to_rag_rule, output_path_rag_review, MODEL_NAME)        
 
-        print("The Number of Scenes Loaded: ", len(scenes_from_input_file))
+        output_path_rag = OUTPUT_DIR / OUTPUT_FILES[0]
+        rag_continuity_detector = RagContinuityDetector(input_path, output_path_rag, MODEL_NAME)
 
+        #print("Input to rag rule: ", rag_continuity_detector.input_file_name)
+        #print("\nOutput to rag rule: ", rag_continuity_detector.output_file_name)
+
+        # input_path == "./src/dataset/scene_enriched_error/train_error_scenes_enriched.jsonl"
+        #3print("Input path: ", input_path)
+        
+        #####################################################################
+        # scenes_from_input_file = rag_continuity_detector.LoadScenes(input_to_rag_rule)
+        #####################################################################
+
+        scenes = []
+        related__scenes = []
+
+        scenes, related_scenes = rag_review_continuity_detector_rule.LoadScenesFromRuleBasedResult(scenes_info=all_rule_based_issues, jsonl_file_path=input_path)
+
+        scenesCollection = rag_review_continuity_detector_rule.SaveSceneToRAGDatabase(scenes)
+
+        resultsScenes = scenesCollection.get()
+
+        print("\n", "*" * 150, "\n")
+        print("Result Collection: ", scenesCollection.count())
+        for i in range(len(resultsScenes["ids"])):
+            print("Scene Id: ", resultsScenes["ids"][i])
+            print("Document: ", resultsScenes["documents"][i])
+            print("Metadata: ", resultsScenes["metadatas"][i])
+            print("-" * 50)       
+        
+        relatedScenesCollection = rag_review_continuity_detector_rule.SaveSceneToRAGDatabase(related_scenes)
+
+        resultsRelated = relatedScenesCollection.get()
+        
+        print("\n", "*" * 150, "\n")
+        print("Related Collection: ", relatedScenesCollection.count())
+        for i in range(len(resultsRelated["ids"])):
+            print("Scene Id: ", resultsRelated["ids"][i])
+            print("Document: ", resultsRelated["documents"][i])
+            print("Metadata: ", resultsRelated["metadatas"][i])
+            print("-" * 50)
+
+        print("\n", "*" * 150, "\n")
+
+        rag_review_continuity_detector_rule.ClearCollectionContent(scenesCollection)
+        rag_review_continuity_detector_rule.ClearCollectionContent(relatedScenesCollection)
+        
+        
+        
+        #for scene in scenes_from_input_file:
+        #    print("\nScene from input file: ", scene)
+        
+        #print("The number of scene: ", len(scenes_from_input_file))
+
+        #for i, scene in enumerate(scenes_from_input_file):
+        #    print("\nThe scene ",i, ":", scene)
+
+        #############################################################################################
+        rag_continuity_detector.ClearCollection()
+        #
+        #collection = rag_continuity_detector.SaveSceneToRAGDatabase(scenes_from_input_file)
+        ################################################################################################
+
+        #print("The Number of Scenes Loaded: ", len(scenes_from_input_file))
+        #def rule_based_error_rag_llm_review(input_path: Path, output_path: Path, rag_collection, rag_continuity_detector):
+        
+        #############################################################################################################################################################
+        #rule_based_error_rag_llm_review(input_path=input_path, output_path=output_path, rag_collection=collection, rag_continuity_detector=rag_continuity_detector)
+        #############################################################################################################################################################
+
+        #for i, rule_based_issue in enumerate(all_rule_based_issues):
+            # 05-20-2026 begin here
+
+        # def BuildContinuityPromptRAGForRule(self, current_scene, previous_scene, continuity_issue_id):
+        #for i, current_scene in enumerate(scenes_from_input_file):
+        #    for j, rule_based_issue in enumerate(all_rule_based_issues):
+        #        if current_scene["script_id"] == rule_based_issue["script_id"] and current_scene["scene_id"] == rule_based_issue["detectors"]["rule_based"]["errors"]["scene_id"]
+        #        prompt = rag_continuity_detector.BuildContinuityPromptRAGForRule(current_scene, )
         
         #collection = rag_continuity_detector.LoadScenes(input_path)
-        collection = rag_continuity_detector.SaveSceneToRAGDatabase(scenes_from_input_file)
+        
 
         #def SaveSceneToRAGDatabase(self, scene, scene_document_text, metadata):
         #    self.collection.add(ids=[scene["scene_id"]], documents=[scene_document_text], metadatas=[metadata])
@@ -481,7 +739,11 @@ def main() -> None:
         lstResult = []
         
         #for current_scene in scenes_from_input_file:
-        for i , current_scene in enumerate(scenes_from_input_file):
+
+        
+        #for i , current_scene in enumerate(scenes_from_input_file):
+
+            
             #print("Checking:", current_scene["scene_id"])
 
             # def GetStronglyRelatedScenes(current_scene: dict, collection, top_k: int = 10, max_distance: float = 0.8):
@@ -491,14 +753,14 @@ def main() -> None:
             #print("Collection: ", collection)
             
             #related_previous_scenes = rag_continuity_detector.GetStronglyRelatedScenes(current_scene, rag_continuity_detector.collection, top_k=10, max_distance=0.8)
-            related_previous_scenes = rag_continuity_detector.GetStronglyRelatedScenes(current_scene, collection, top_k=10, max_distance=0.8)
+            #related_previous_scenes = rag_continuity_detector.GetStronglyRelatedScenes(current_scene, collection, top_k=10, max_distance=0.8)
 
             #print("Strongly Related Scenes: ", related_previous_scenes)
 
             #print("Related Prev. Scenes: ", related_previous_scenes)
             # def BuildContinuityPrompt(current_scene: dict, related_scenes: list):
-            prompt = rag_continuity_detector.BuildContinuityPrompt(current_scene=current_scene, 
-                                                                   related_scenes=related_previous_scenes)
+            #prompt = rag_continuity_detector.BuildContinuityPrompt(current_scene=current_scene, 
+            #                                                       related_scenes=related_previous_scenes)
 
             #print("Prompt: ", prompt)
 
@@ -509,14 +771,17 @@ def main() -> None:
             #result = rag_continuity_detector.CheckContinuityWithLLM(current_scene=current_scene,
             #                                                        collection=rag_continuity_detector.collection)
 
-            result = rag_continuity_detector.CheckContinuityWithLLM(current_scene=current_scene,            
-                                                                    collection=collection)
+            #################################################################################################
+            #result = rag_continuity_detector.CheckContinuityWithLLM(current_scene=current_scene,            
+            #                                                        collection=collection)
+            #################################################################################################
+            
 
             #output = self.SendPromptToModel(mistral_prompt)[0]["generated_text"]
-            if (result is not None):
-                print("LLM returns: ", result)
+            #if (result is not None):
+            #    print("LLM returns: ", result)
             
-            lstResult.append(result)
+            #lstResult.append(result)
             #print(result)
             #if i >= 20:
             #    break;

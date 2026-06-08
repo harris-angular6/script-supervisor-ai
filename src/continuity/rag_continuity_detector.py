@@ -68,6 +68,40 @@ class RagContinuityDetector:
         """.strip()
         '''
 
+    def BuildSceneForContinuityIssue(self, scene):
+        return {
+            "script_id": scene.get("script_id"),
+            "scene_id": scene.get("scene_id"),            
+            "scene_index": scene.get("scene_index"),
+            "slugline": scene.get("slugline", ""),
+            "location": scene.get("location", ""),
+            "time_of_day": scene.get("time_of_day", ""),
+            "characters": scene.get("characters", []),
+            "props": scene.get("normalized_props", scene.get("props", [])),
+            "wardrobe": scene.get("wardrobe", {}),
+            "actions": scene.get("actions", []),
+            "action_summary": scene.get("action_summary", ""),
+            "scene_text": scene.get("scene_text", "")
+        }
+
+    def BuildSceneDocumentForContinuityIssue(self, scene):
+        #print("\nScene (Build Scene Document: ", scene)
+        
+        return {
+            "script_id": scene.get("script_id"),
+            "scene_id": scene.get("scene_id"),            
+            "scene_index": scene.get("scene_index"),
+            "slugline": scene.get("slugline", ""),
+            "location": scene.get("location", ""),
+            "time_of_day": scene.get("time_of_day", ""),
+            "characters": scene.get("characters", []),
+            "props": scene.get("normalized_props", scene.get("props", [])),
+            "wardrobe": scene.get("wardrobe", {}),
+            "actions": scene.get("actions", []),
+            "action_summary": scene.get("action_summary", ""),
+            "scene_text": scene.get("scene_text", "")
+        }
+        
     def GetSceneList(self):
         scene = None
         scene_document_text = None
@@ -76,7 +110,8 @@ class RagContinuityDetector:
         with open(self.input_file_name, "r", encoding="utf-8") as jsonl_file:
             for json_line in jsonl_file:
                 scene = json.loads(json_line)
-                scene_document_text = self.BuildSceneDocumentText(scene)
+                #scene_document_text = self.BuildSceneDocumentText(scene)
+                scene_document_text = self.BuildSceneForContinuityIssue(scene)
 
                 metadata = {
                     "script_id": scene["script_id"],
@@ -95,7 +130,8 @@ class RagContinuityDetector:
         
         #print("Current Scene: ", current_scene)
         #print("Collection: ", collection.peek())
-        query_text = self.BuildSceneDocumentText(current_scene)
+        #query_text = self.BuildSceneDocumentText(current_scene)
+        query_text = self.BuildSceneForContinuityIssue(current_scene)
         #print("Query Text: ", query_text)
         
         results = collection.query(query_texts=[query_text],
@@ -172,26 +208,145 @@ class RagContinuityDetector:
 
     def LoadScenesFromRuleBasedErrorResult(self, scenes_info, jsonl_file_path):
         continuity_issues_rule_based_result = []
-        
+
         with open(jsonl_file_path, "r", encoding="utf-8") as json_file_scenes:
             scenes = [json.loads(json_line) for json_line in json_file_scenes]
 
-        for scene_info in scenes_info:
-            result_scenes = [
-                scene for scene in scenes
-                if scene["script_id"] == scene_info["script_id"] and 
+        i = 0
+        for scene_info in scenes_info:            
+            result_scene = next(
+                (
+                    scene for scene in scenes
+                    if scene["script_id"] == scene_info["script_id"] 
+                        and scene["scene_id"] == scene_info["detectors"]["rule_based"]["errors"]["scene_id"]
+                ),
+                None
+            )
+
+            result_related_scene = next(
+                (
+                    scene for scene in scenes
+                    if scene["script_id"] == scene_info["script_id"]
+                        and scene["scene_id"] == scene_info["detectors"]["rule_based"]["errors"]["related_scene_id"]
+                ),
+                None
+            )
+
+            continuity_issues_rule_based_result.append({                
+                "continuity_issue_id": scene_info.get("continuity_issue_id", ""),                
+                "script_id": scene_info.get("script_id", ""),
+                "detectors": {
+                    "rule_based": {                        
+                        "has_error": (
+                            scene_info.get("detectors", {}).get("rule_based", {}).get("has_error", False),
+                        ),
+                        "errors": {                            
+                            "scene_id": result_scene.get("scene_id", ""),                            
+                            "scene_index": result_scene.get("scene_index", ""),                            
+                            "related_scene_id": result_related_scene.get("scene_id", ""),                            
+                            "issue_type": (
+                                scene_info.get("detector", {}).get("rule_based", {}).get("error", {}).get("issue_type", "")
+                            ),                                                            
+                            "severity": (
+                                scene_info.get("detector", {}).get("rule_based", {}).get("error", {}).get("severity", "")
+                            ),                            
+                            "description": (
+                                scene_info.get("detector", {}).get("rule_based", {}).get("error", {}).get("description", "")
+                            ),                            
+                            "evidence": (
+                                scene_info.get("detector", {}).get("rule_based", {}).get("error", {}).get("evidence", "")
+                            ),                            
+                            "confidence": (
+                                scene_info.get("detector", {}).get("rule_based", {}).get("error", {}).get("confidence", "")
+                            )
+                        }                           
+                    }, 
+                    "rag_llm": {
+                        "has_error": False, 
+                        "errors": None
+                    }, 
+                    "fine_tuned_llm": {
+                        "has_error": False, 
+                        "errors": None                    
+                    }
+                },
+                "scene": {
+                    # 06-03-2026 - begin here: result_scene
+                    "script_id": result_scene.get("script_id", ""),
+                    "scene_id": result_scene.get("scene_id", ""),
+                    "scene_index": result_scene.get("scene_index", ""),
+                    "slugline": result_scene.get("slugline", ""),
+                    "location": result_scene.get("location", ""),
+                    "time_of_day": result_scene.get("time_of_day", ""),
+                    "scene_text": result_scene.get("scene_text", ""),
+                    "characters": result_scene.get("characters", ""),
+                    "props": result_scene.get("props", ""),
+                    "actions": result_scene.get("actions", ""),
+                    "normalized_props": result_scene.get("normalized_props", ""),
+                    "wardrobe": result_scene.get("wardrobe", ""),
+                    "action_summary": result_scene.get("action_summary", ""),
+                    "continuity_links": {
+                        "previous_scene_id": result_scene.get("continuity_links", {}).get("previous_scene_id", None),
+                        "next_scene_id": result_scene.get("continuity_links", {}).get("next_scene_id", ""),
+                        "same_location_as_previous": result_scene.get("continuity_links", {}).get("same_location_as_previous", False),
+                        "same_time_of_day_as_previous": result_scene.get("continuity_links", {}).get("same_time_of_day_as_previous", False),
+                        "continuous_with_previous": result_scene.get("continuity_links", {}).get("continuous_with_previous", False)                        
+                    } 
+                },
+                "related_scene": {
+                    "script_id": result_related_scene.get("script_id", ""),
+                    "scene_id": result_related_scene.get("scene_id", ""),
+                    "scene_index": result_related_scene.get("scene_index", ""),
+                    "slugline": result_related_scene.get("slugline", ""),
+                    "location": result_related_scene.get("location", ""),
+                    "time_of_day": result_related_scene.get("time_of_day", ""),
+                    "scene_text": result_related_scene.get("scene_text", ""),
+                    "characters": result_related_scene.get("characters", ""),
+                    "props": result_related_scene.get("props", ""),
+                    "actions": result_related_scene.get("actions", ""),
+                    "normalized_props": result_related_scene.get("normalized_props", ""),
+                    "wardrobe": result_related_scene.get("wardrobe", ""),
+                    "action_summary": result_related_scene.get("action_summary", ""),
+                    "continuity_links": {
+                        "previous_scene_id": result_related_scene.get("continuity_links", {}).get("previous_scene_id", None),
+                        "next_scene_id": result_related_scene.get("continuity_links", {}).get("next_scene_id", ""),
+                        "same_location_as_previous": result_related_scene.get("continuity_links", {}).get("same_location_as_previous", False),
+                        "same_time_of_day_as_previous": result_related_scene.get("continuity_links", {}).get("same_time_of_day_as_previous", False),
+                        "continuous_with_previous": result_related_scene.get("continuity_links", {}).get("continuous_with_previous", False)                        
+                    }         
+                },
+                "final_merged_result": {
+                    "has_error": scene_info.get("final_merged_result", {}).get("has_error", False),                     
+                    "issue_type": scene_info.get("final_merged_result", {}).get("issue_type", ""),
+                    "severity": scene_info.get("final_merged_result", {}).get("severity", ""),
+                    "description": scene_info.get("final_merged_result", {}).get("description", ""),
+                    "evidence": scene_info.get("final_merged_result", {}).get("evidence", ""),
+                    "confidence": scene_info.get("final_merged_result", {}).get("confidence", ""),
+                    "supporting_detectors": scene_info.get("final_merged_result", {}).get("supporting_detectors", "")                    
+                }
+            })
             
+            #print("\n", "*" * 100)            
+            #print("The Result Scene: ", result_scene)
+            #print("\n", "=" * 100)
+            #print("The Result Related Scene: ", result_related_scene)
+            i += 1            
+            if i >= 10:
+                break
 
         
-        
-
 
         
+        #print("\nThe Count of Continuity Issue: ", len(continuity_issues_rule_based_result), "\n")
+        '''
+        for continuity_issue in continuity_issues_rule_based_result:
+            print("\n", "=" * 150)           
+            print("Continuity Issue: ", continuity_issue)
 
-                    
+        '''
 
-                
-        
+        return continuity_issues_rule_based_result
+        #return continuity_issues_rule_based_result.sort(key=lambda x: x["continuity_issue_id"])
 
     def LoadScenesFromRuleBasedResult(self, scenes_info, jsonl_file_path):
         scenes = []
@@ -216,9 +371,9 @@ class RagContinuityDetector:
                     #print("Scene Info: ", scene_info)
                     
                     if scene_info["script_id"] == scene["script_id"] and scene_info["detectors"]["rule_based"]["errors"]["scene_id"] == scene["scene_id"]:
-                        print("\nThe value of i when scene info == scene: ", i)
-                        print("\nThe value of continuity issue id: ", scene_info["continuity_issue_id"])
-                        print("\nThe value of scene id: ", scene["scene_id"])
+                        #print("\nThe value of i when scene info == scene: ", i)
+                        #print("\nThe value of continuity issue id: ", scene_info["continuity_issue_id"])
+                        #print("\nThe value of scene id: ", scene["scene_id"])
                         scenes.append({
                             "script_id": scene["script_id"],
                             "scene_id": scene["scene_id"],
@@ -236,9 +391,9 @@ class RagContinuityDetector:
                                 }
                         })
                     if scene_info["script_id"] == scene["script_id"] and scene_info["detectors"]["rule_based"]["errors"]["related_scene_id"] == scene["scene_id"]:
-                        print("\nThe value of i when related scene info == scene: ", i)
-                        print("\nThe value of related scene in continuity issue id: ", scene_info["continuity_issue_id"])
-                        print("\nThe value of scene id: ", scene["scene_id"])
+                        #print("\nThe value of i when related scene info == scene: ", i)
+                        #print("\nThe value of related scene in continuity issue id: ", scene_info["continuity_issue_id"])
+                        #print("\nThe value of scene id: ", scene["scene_id"])
                         related_scenes.append({
                             "script_id": scene["script_id"],
                             "scene_id": scene["scene_id"],
@@ -323,7 +478,7 @@ class RagContinuityDetector:
                 "slugline": scene.get("slugline")
             })
 
-            print("\nRag IDS: ", ids, "\n")
+            #print("\nRag IDS: ", ids, "\n")
 
         self.collection.add(
             ids=ids,
@@ -355,6 +510,98 @@ class RagContinuityDetector:
         '''
         
         return self.collection
+
+    def BuildContinuityScenePairDocument(self, continuity_issue: str):        
+        scene = continuity_issue.get("scene", {})
+        related_scene = continuity_issue.get("related_scene", {})
+    
+        return f"""
+            CURRENT SCENE:
+            slugline: {scene.get("slugline", "")}
+            location: {scene.get("location", "")}
+            time of day: {scene.get("time_of_day", "")}
+            characters: {", ".join(scene.get("characters", []))}
+            props: {", ".join(scene.get("props", []))}
+            normalized props: {", ".join(scene.get("normalized_props", []))}
+            wardrobe: {json.dumps(scene.get("wardrobe", {}), ensure_ascii=False)}
+            actions: {" ".join(scene.get("actions", []))}
+            action summary: {scene.get("action_summary", "")}
+            
+            Scene text:
+            {scene.get("scene_text", "")}
+            
+            RELATED SCENE:
+            slugline: {related_scene.get("slugline", "")}
+            location: {related_scene.get("location", "")}
+            time of day: {related_scene.get("time_of_day", "")}
+            characters: {", ".join(related_scene.get("characters", []))}
+            props: {", ".join(related_scene.get("props", []))}
+            normalized props: {", ".join(related_scene.get("normalized_props", []))}
+            wardrobe: {json.dumps(related_scene.get("wardrobe", {}), ensure_ascii=False)}
+            actions: {" ".join(related_scene.get("actions", []))}
+            action summary: {related_scene.get("action_summary", "")}
+            
+            related scene text:
+            {related_scene.get("scene_text", "")}
+            """.strip()
+
+    def SaveContinuityIssuesToRAGDatabase(self, continuity_issues: str):
+        ids = []
+        documents = []
+        metadatas = []
+
+        # print("Continuity Issues: ", continuity_issues)
+
+        for continuity_issue in continuity_issues:
+            # print("\nContinuity Issue (In Saving RAG Database): ", continuity_issue.get("continuity_issue_id", ""))
+            # print("\nScript Id (In Saving RAG Database): ", continuity_issue.get("script_id", ""))
+            ids.append(continuity_issue.get("continuity_issue_id", ""))
+            # documents.append(continuity_issue.get("script_id", ""))
+            documents.append(self.BuildContinuityScenePairDocument(continuity_issue))
+
+            #print("\nRAG Collection (Script Id): ", continuity_issue.get("scene", {}).get("script_id", ""))
+            #print("\nRAG Collection (Script Id): ", continuity_issue["scene"]["script_id"])
+
+            metadatas.append({
+                "scene_script_id": continuity_issue.get("scene", {}).get("script_id", ""),
+                "scene_scene_id": continuity_issue.get("scene", {}).get("scene_id", ""),
+                "scene_scene_index": continuity_issue.get("scene", {}).get("scene_index", -1),
+                #"scene_slugline": continuity_issue.get("scene", {}).get("slugline", ""),
+                "scene_location": continuity_issue.get("scene", {}).get("location", ""),
+                "scene_time_of_day": continuity_issue.get("scene", {}).get("time_of_day", ""),
+                #"scene_scene_text": continuity_issue.get("scene", {}).get("scene_text", ""),
+                #"scene_characters": continuity_issue.get("scene", {}).get("characters", ""),
+                #"scene_props": continuity_issue.get("scene", {}).get("props", ""),
+                #"scene_actions": continuity_issue.get("scene", {}).get("actions", ""),
+                #"scene_normalized_props": continuity_issue.get("scene", {}).get("normalized_props", ""),
+                #"scene_wardrobe": continuity_issue.get("scene", {}).get("wardrobe", ""),
+                #"scene_action_summary": continuity_issue.get("scene", {}).get("action_summary", ""),
+
+                "related_scene_script_id": continuity_issue.get("related_scene", {}).get("script_id", ""),
+                "related_scene_id": continuity_issue.get("related_scene", {}).get("scene_id", ""),
+                "related_scene_index": continuity_issue.get("related_scene", {}).get("scene_index", -1),
+                #"related_scene_slugline": continuity_issue.get("related_scene", {}).get("slugline", ""),
+                "related_scene_location": continuity_issue.get("related_scene", {}).get("location", ""),
+                "related_scene_time_of_day": continuity_issue.get("related_scene", {}).get("time_of_day", ""),
+                #"related_scene_text": continuity_issue.get("related_scene", {}).get("scene_text", ""),
+                #"related_scene_characters": continuity_issue.get("related_scene", {}).get("characters", ""),
+                #"related_scene_props": continuity_issue.get("related_scene", {}).get("props", ""),
+                #"related_scene_actions": continuity_issue.get("related_scene", {}).get("actions", ""),
+                #"related_scene_normalized_props": continuity_issue.get("related_scene", {}).get("normalized_props", ""),
+                #"related_scene_wardrobe": continuity_issue.get("related_scene", {}).get("wardrobe", ""),
+                #"related_scene_action_summary": continuity_issue.get("related_scene", {}).get("action_summary", ""),                
+            })
+
+        self.collection.add(
+            ids=ids,
+            documents=documents,
+            metadatas=metadatas
+        )
+
+        #print("\nRAG Collection: ", self.collection.get())
+        return self.collection
+
+
 
     #def GetSceneFromCollectionElement(self, scene_id, collection):
         # 05-22-2026
@@ -468,9 +715,18 @@ class RagContinuityDetector:
         return prompt.strip()
 
     def BuildContinuityPromptRAG_ReviewRule(self, current_scene, previous_scene, continuity_issue_id):
-        current_scene_text = self.BuildSceneDocumentText(current_scene)
+        # current_scene_text = self.BuildSceneDocumentText(current_scene)
+        # previous_scene_text = self.BuildSceneDocumentText(previous_scene)
 
-        previous_scene_text = self.BuildSceneDocumentText(previous_scene)
+        #print("=" * 150)
+        #print("\nCurrent Scene: ", current_scene)
+        #print("\nPrevious Scene: ", previous_scene)
+
+        #print("\nCurrent Scene Text: ", current_scene)
+        current_scene_text = self.BuildSceneDocumentForContinuityIssue(current_scene)
+
+        #print("\nPrevious Scene Text: ", previous_scene)
+        previous_scene_text = self.BuildSceneDocumentForContinuityIssue(previous_scene)
         
         #previous_scene_text = f"""
         #                        Previous Scene ID: {previous_scene["scene_id"]}
@@ -510,8 +766,8 @@ class RagContinuityDetector:
         Return this JSON format:
 
         {{
-            "continuity_issue_id": continuity_issue_id,
-            "script_id": current_scene["script_id"],
+            "continuity_issue_id": {continuity_issue_id},
+            "script_id": {current_scene["script_id"]},
             "has_continuity_error": true,
 
             "detectors": {{
@@ -522,9 +778,9 @@ class RagContinuityDetector:
                 "rag_llm": {{
                     "has_error": true,
                     "errors": {{
-                        "scene_id": current_scene["scene_id"],
-                        "scene_index": current_scene["scene_index"],
-                        "related_scene_id": previous_scene["scene_id"],
+                        "scene_id": {current_scene["scene_id"]},
+                        "scene_index": {current_scene["scene_index"]},
+                        "related_scene_id": {previous_scene["scene_id"]},
                         "issue_type": Continuity Error Type here,
                         "severity": print the severity level here,
                         "description": print description here
@@ -606,7 +862,7 @@ class RagContinuityDetector:
     def CheckContinuityWithLLM_Review(self, current_scene, prev_scene, continuity_issue_id):
         #def BuildContinuityPromptRAGForRule(self, current_scene, previous_scene, continuity_issue_id):
 
-        print("Current scene in CheckContinuityWithLLM_Review: ", current_scene)
+        #print("Current scene in CheckContinuityWithLLM_Review: ", current_scene)
         prompt = self.BuildContinuityPromptRAG_ReviewRule(current_scene=current_scene, previous_scene=prev_scene, continuity_issue_id=continuity_issue_id)
 
         mistral_prompt = f"<s>[INST] {prompt} [/INST]"

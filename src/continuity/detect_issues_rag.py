@@ -84,8 +84,7 @@ def group_by_script(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]
     for script_id in grouped:
         grouped[script_id].sort(key=lambda r: r.get("scene_index", 0))
 
-    return grouped
-
+    return grouped  
 
 def scene_link_strength(prev_scene: Dict[str, Any], curr_scene: Dict[str, Any]) -> str:
     links = curr_scene.get("continuity_links", {}) or {}
@@ -522,6 +521,115 @@ def detect_issues_for_script_rag_llm_review(issues: List[Dict[str, Any]], rag_co
     else:
         return None
 
+#################################################################################################################
+def issue_result_rag_llm_review(continuity_issue_id, issues, rag_collection, rag_continuity_detector):
+
+    current_scene = []
+    related_scene = []
+
+    current_scene_id = None
+    related_scene_id = None
+    
+    #for i, issue in enumerate(issues):
+    for issue in issues:
+        if issue["continuity_issue_id"] == continuity_issue_id:
+            current_scene_id = issue.get("detectors", {}).get("scene", {}).get("scene_id", "")
+            related_sceen_id = issue.get("detectors", {}).get("related_scene", {}).get("scene_id", "")
+            #current_scene_id = issue["detectors"]["rule_based"]["errors"]["scene_id"]
+            #related_scene_id = issue["detectors"]["rule_based"]["errors"]["related_scene_id"]   
+            
+    #for scene in scenes:
+    #for i in range(len(rag_collection["ids"])):
+
+    resultCollection = rag_collection.get()
+
+    #print("Result Collection: ", resultCollection)
+
+    #print("Length of result Collection: ", len(resultCollection))
+    #print("Length of result Collection ids: ", len(resultCollection["ids"]))
+    #print("Length of resultCollection[ids][0]: ", len(resultCollection["ids"][0]))
+    #print("Value of resultCollection[ids]: ", resultCollection["ids"])
+    
+    for i in range(len(resultCollection["ids"])):
+        #print("\nContinuity Issue Id: ", continuity_issue_id)
+        #print("\nResult Collection: ", resultCollection["ids"][i])
+        if continuity_issue_id == resultCollection["ids"][i]:
+            current_scene = {
+                "script_id": resultCollection["metadatas"][i].get("scene_script_id"),
+                "scene_id": resultCollection["metadatas"][i].get("scene_scene_id"),
+                "scene_index": resultCollection["metadatas"][i].get("scene_scene_index"),
+                "slugline": resultCollection["metadatas"][i].get("scene_slugline"),
+                "location": resultCollection["metadatas"][i].get("scene_location"),
+                "time_of_day": resultCollection["metadatas"][i].get("scene_time_of_day"),
+                "scene_text": resultCollection["metadatas"][i].get("scene_scene_text"),
+                "characters": resultCollection["metadatas"][i].get("scene_characters"),
+                "props": resultCollection["metadatas"][i].get("scene_props"),
+                "actions": resultCollection["metadatas"][i].get("scene_actions"),
+                "normalized_props": resultCollection["metadatas"][i].get("scene_normalized_props"),
+                "wardrobe": resultCollection["metadatas"][i].get("scene_wardrobe"),
+                "action_summary": resultCollection["metadatas"][i].get("scene_action_summary")
+            }
+            #print("\nCurrent Scene: ", current_scene)
+            
+            related_scene = {
+                "script_id": resultCollection["metadatas"][i].get("related_scene_script_id"),
+                "scene_id": resultCollection["metadatas"][i].get("related_scene_id"),
+                "scene_index": resultCollection["metadatas"][i].get("related_scene_index"),
+                "slugline": resultCollection["metadatas"][i].get("related_scene_slugline"),
+                "location": resultCollection["metadatas"][i].get("related_scene_location"),
+                "time_of_day": resultCollection["metadatas"][i].get("related_scene_time_of_day"),
+                "scene_text": resultCollection["metadatas"][i].get("related_scene_text"),
+                "characters": resultCollection["metadatas"][i].get("related_scene_charachters"),
+                "props": resultCollection["metadatas"][i].get("related_scene_props"),
+                "actions": resultCollection["metadatas"][i].get("related_scene_actions"),
+                "normalized_props": resultCollection["metadatas"][i].get("related_scene_normalized_props"),
+                "wardrobe": resultCollection["metadatas"][i].get("related_scene_wardrobe"),
+                "action_summary": resultCollection["metadatas"][i].get("related_scene_action_summary")
+            }
+
+            #print("\nRelated Scene: ", related_scene)
+        
+        #print("Current Scene Id: ", current_scene_id)
+        #print("Scene Id in resultCollection: ", resultCollection["ids"][i])
+
+        '''
+        if current_scene_id == resultCollection["ids"][i]:
+            print("Current Scene Id == resultCollection[ids][i]: ", current_scene_id, " == ", resultCollection["ids"][i])    
+        
+        if current_scene_id == resultCollection["ids"][i]:
+            current_scene = {
+                "scene_id": resultCollection["ids"][i],
+                "script_id": resultCollection["metadatas"][i]["script_id"],
+                "scene_index": resultCollection["metadatas"][i]["scene_index"],
+                "location": resultCollection["metadatas"][i]["location"],
+                "time_of_day": resultCollection["metadatas"][i]["time_of_day"],
+                "scene_text": resultCollection["documents"][i]
+            }
+        if related_scene_id == resultCollection["ids"][i]:
+            related_scene = {
+                "scene_id": resultCollection["ids"][i],
+                "script_id": resultCollection["metadatas"][i]["script_id"],
+                "scene_index": resultCollection["metadatas"][i]["scene_index"],
+                "location": resultCollection["metadatas"][i]["location"],
+                "time_of_day": resultCollection["metadatas"][i]["time_of_day"],
+                "scene_text": resultCollection["documents"][i]
+            }    
+        '''
+
+    #print("Current scene in issue_review_result_rag_llm: ", current_scene)group_by_script
+
+    #3print("=" * 150)
+    #print("\nCurrent Scene: ", current_scene)
+    #print("\nRelated Scene: ", related_scene)
+    
+    if current_scene and related_scene:    
+        output = rag_continuity_detector.CheckContinuityWithLLM_Review(current_scene, related_scene, continuity_issue_id)
+        return output
+    else:
+        return None
+
+###########################################################################################################################
+    
 def issue_review_result_rag_llm(continuity_issue_id, issues, rag_collection, rag_continuity_detector):
 
     #current_scene = Dict[str, Any]
@@ -579,7 +687,7 @@ def issue_review_result_rag_llm(continuity_issue_id, issues, rag_collection, rag
                 "scene_text": resultCollection["documents"][i]
             }    
 
-    #print("Current scene in issue_review_result_rag_llm: ", current_scene)
+    #print("Current scene in issue_review_result_rag_llm: ", current_scene)group_by_script
 
     if current_scene and related_scene:    
         output = rag_continuity_detector.CheckContinuityWithLLM_Review(current_scene, related_scene, continuity_issue_id)
@@ -602,6 +710,12 @@ def process_file(input_path: Path, output_path: Path) -> None:
             break;       
 
     write_jsonl(output_path, all_issues)
+
+def save_continuity_issues_with_scenes(json_inputs: list, output_file_path: str) -> None:
+    with open(output_file_path, "w", encoding="utf-8") as jsonl_file:
+        for item in json_inputs:
+            jsonl_file.write(json.dumps(item) + "\n")
+
 
 def rule_based_error_rag_llm_review(input_path: Path, output_path: Path, rag_collection, rag_continuity_detector):
     rows = read_jsonl(input_path)
@@ -641,14 +755,49 @@ def main() -> None:
         process_file(input_path, output_path)
 
         input_to_rag_rule = output_path
-        output_path_rag_review = OUTPUT_DIR / OUTPUT_FILES_RAG_REVIEW[0]       
+        output_path_rag_review = OUTPUT_DIR / OUTPUT_FILES_RAG_REVIEW[0] 
+        
         all_rule_based_issues = read_jsonl(input_to_rag_rule)
+        
         #rag_continuity_detector = RagContinuityDetector(input_path, output_path, MODEL_NAME)
 
-        rag_review_continuity_detector_rule = RagContinuityDetector(input_to_rag_rule, output_path_rag_review, MODEL_NAME)        
+        rag_review_continuity_detector_rule = RagContinuityDetector(input_to_rag_rule, output_path_rag_review, MODEL_NAME)
 
-        output_path_rag = OUTPUT_DIR / OUTPUT_FILES[0]
-        rag_continuity_detector = RagContinuityDetector(input_path, output_path_rag, MODEL_NAME)
+        all_continuity_issues = rag_review_continuity_detector_rule.LoadScenesFromRuleBasedErrorResult(scenes_info=all_rule_based_issues, jsonl_file_path=input_path)
+
+        # print("\nAll Continuity Issues: ", all_continuity_issues, "\n")
+        collection = rag_review_continuity_detector_rule.SaveContinuityIssuesToRAGDatabase(all_continuity_issues)
+
+        #print("Collection: ", collection)
+        results = collection.get()
+
+        '''
+        for i in range(len(results["ids"])):
+            print("\nContinuity Issue Id: ", results["ids"][i])
+            print("Documents: ", results["documents"][i])
+            print("Metadata: ", results["metadatas"][i])
+            print("\n", "=" * 100)
+        '''
+
+        for i in range(len(results["ids"])):
+            #print("\n", "*" * 150)
+            #print("\nContinuity Issue Id: ", results["ids"][i])
+            #print("All Continuity_Issues: ", all_continuity_issues)
+            #print("Collection: ", results)
+            #print("Rag Review Continuity Detector: ", rag_review_continuity_detector_rule)                  
+            
+            reviewResultRAG_LLM = issue_result_rag_llm_review(results["ids"][i], all_continuity_issues, collection, rag_review_continuity_detector_rule)
+            print("RAG LLM Review Result: ", reviewResultRAG_LLM)
+
+        #rag_review_continuity_detector_rule.ClearCollection()
+        # def save_continuity_issues_with_scenes(json_inputs: list, output_path: str) -> None:
+        #####################################################################################
+        # save_continuity_issues_with_scenes(all_continuity_issues, output_path_rag_review)
+        #####################################################################################
+
+        
+        #output_path_rag = OUTPUT_DIR / OUTPUT_FILES[0]
+        #rag_continuity_detector = RagContinuityDetector(input_path, output_path_rag, MODEL_NAME)
 
         #print("Input to rag rule: ", rag_continuity_detector.input_file_name)
         #print("\nOutput to rag rule: ", rag_continuity_detector.output_file_name)
@@ -660,6 +809,7 @@ def main() -> None:
         # scenes_from_input_file = rag_continuity_detector.LoadScenes(input_to_rag_rule)
         #####################################################################
 
+        '''
         scenes = []
         related__scenes = []
 
@@ -693,7 +843,7 @@ def main() -> None:
 
         rag_review_continuity_detector_rule.ClearCollectionContent(scenesCollection)
         rag_review_continuity_detector_rule.ClearCollectionContent(relatedScenesCollection)
-        
+        '''
         
         
         #for scene in scenes_from_input_file:
@@ -705,7 +855,7 @@ def main() -> None:
         #    print("\nThe scene ",i, ":", scene)
 
         #############################################################################################
-        rag_continuity_detector.ClearCollection()
+        #rag_continuity_detector.ClearCollection()
         #
         #collection = rag_continuity_detector.SaveSceneToRAGDatabase(scenes_from_input_file)
         ################################################################################################

@@ -1,11 +1,13 @@
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from rag_continuity_detector import RagContinuityDetector
 
 USE_RAG = True
 RAG_CONFIDENCE_THRESHOLD = 0.60
-MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
+#MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
+MODEL_NAME = "./foundation_model/base_llm/llama-3.1-8b-instruct"
 
 RULE_BASED_ERROR = 0
 RAG_LLM_ERROR = 1
@@ -23,6 +25,12 @@ INPUT_FILES = [
 
 OUTPUT_FILES_RAG_REVIEW = [
     "train_error_issues_rag_review.jsonl",
+    #"val_error_issues_rag_review.jsonl",
+    #"test_error_scenes_rag_review.jsonl",
+]
+
+OUTPUT_FILES_RAG_LLM_REVIEW = [
+    "train_error_issues_rag_llm_review.jsonl",
     #"val_error_issues_rag_review.jsonl",
     #"test_error_scenes_rag_review.jsonl",
 ]
@@ -71,7 +79,6 @@ def write_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"[DONE] Wrote {len(rows)} rows to {path}")
-
 
 def group_by_script(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     grouped: Dict[str, List[Dict[str, Any]]] = {}
@@ -522,7 +529,7 @@ def detect_issues_for_script_rag_llm_review(issues: List[Dict[str, Any]], rag_co
         return None
 
 #################################################################################################################
-def issue_result_rag_llm_review(continuity_issue_id, issues, rag_collection, rag_continuity_detector):
+def issue_result_rag_llm_review(continuity_issue_id, issues, result_collection, rag_continuity_detector):
 
     current_scene = []
     related_scene = []
@@ -541,7 +548,8 @@ def issue_result_rag_llm_review(continuity_issue_id, issues, rag_collection, rag
     #for scene in scenes:
     #for i in range(len(rag_collection["ids"])):
 
-    resultCollection = rag_collection.get()
+    #resultCollection = rag_collection.get()
+    resultCollection = result_collection
 
     #print("Result Collection: ", resultCollection)
 
@@ -621,13 +629,50 @@ def issue_result_rag_llm_review(continuity_issue_id, issues, rag_collection, rag
     #3print("=" * 150)
     #print("\nCurrent Scene: ", current_scene)
     #print("\nRelated Scene: ", related_scene)
-    
-    if current_scene and related_scene:    
-        output = rag_continuity_detector.CheckContinuityWithLLM_Review(current_scene, related_scene, continuity_issue_id)
-        return output
-    else:
-        return None
 
+    #list_outputs = []
+    
+       
+
+    #with open(jsonl_rag_review_file_path, "w", encoding="utf-8") as jsonl_file:    
+    if current_scene and related_scene:
+        output = rag_continuity_detector.CheckContinuityWithLLM_Review(current_scene, related_scene, continuity_issue_id)
+
+        generated_text = output[0]["generated_text"]
+
+        #print(repr(generated_text[:500]))
+        json_line = extract_json_from_llama(generated_text)
+        #json_line = json.loads(generated_text)
+
+    return json_line
+
+    #list_outputs.append(parsed)            
+
+    '''
+    jsonl_rag_review_file_path = OUTPUT_DIR / OUTPUT_FILES_RAG_LLM_REVIEW[0]
+
+    with open(jsonl_rag_review_file_path, "w", encoding="utf-8") as jsonl_file:
+        for json_line in list_outputs:
+            jsonl_file.write(json.dumps(json_line, ensure_ascii=False) + "\n")
+    '''
+    
+    '''
+    try:
+        parsed = json.loads(generated_text)
+        jsonl_file.write(json.dumps(parsed, ensure_ascii=False) + "\n")
+        list_outputs.append(parsed)
+    except:
+        fallback = {"raw_output": generated_text, "parse_error": True}
+        jsonl_file.write(json.dumps(fallback, ensure_ascii=False) + "\n")
+        list_outputs.append(fallback)
+        print(f"WARNING: Could not parse model output for {continuity_issue_id}")
+    '''
+
+    #if list_outputs:
+    #    return list_outputs
+    #else:
+    #    return None
+        
 ###########################################################################################################################
     
 def issue_review_result_rag_llm(continuity_issue_id, issues, rag_collection, rag_continuity_detector):
@@ -716,7 +761,29 @@ def save_continuity_issues_with_scenes(json_inputs: list, output_file_path: str)
         for item in json_inputs:
             jsonl_file.write(json.dumps(item) + "\n")
 
+def extract_json_from_llama(generated_text):
+    text = generated_text.strip()
 
+    # Remove common markdown fences
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    # Remove Llama chat template header tokens if present
+    text = re.sub(r"<\|.*?\|>", "", text).strip()
+
+    # Extract first JSON object
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError(f"No valid JSON object found:\n{text[:500]}")
+
+    json_text = text[start:end + 1]
+
+    decoder = json.JSONDecoder()
+
+    return decoder.raw_decode(json_text)
+    #return json.loads(json_text)
+    
 def rule_based_error_rag_llm_review(input_path: Path, output_path: Path, rag_collection, rag_continuity_detector):
     rows = read_jsonl(input_path)
     grouped = group_by_script(rows)
@@ -768,17 +835,19 @@ def main() -> None:
         # print("\nAll Continuity Issues: ", all_continuity_issues, "\n")
         collection = rag_review_continuity_detector_rule.SaveContinuityIssuesToRAGDatabase(all_continuity_issues)
 
-        #print("Collection: ", collection)
+        print("Collection: ", collection)
         results = collection.get()
 
-        '''
+        
+        
         for i in range(len(results["ids"])):
             print("\nContinuity Issue Id: ", results["ids"][i])
             print("Documents: ", results["documents"][i])
             print("Metadata: ", results["metadatas"][i])
             print("\n", "=" * 100)
-        '''
-
+        
+        jsonl_output = []
+        
         for i in range(len(results["ids"])):
             #print("\n", "*" * 150)
             #print("\nContinuity Issue Id: ", results["ids"][i])
@@ -786,8 +855,15 @@ def main() -> None:
             #print("Collection: ", results)
             #print("Rag Review Continuity Detector: ", rag_review_continuity_detector_rule)                  
             
-            reviewResultRAG_LLM = issue_result_rag_llm_review(results["ids"][i], all_continuity_issues, collection, rag_review_continuity_detector_rule)
-            print("RAG LLM Review Result: ", reviewResultRAG_LLM)
+            json_line_rag_review = issue_result_rag_llm_review(results["ids"][i], all_continuity_issues, results, rag_review_continuity_detector_rule)
+            jsonl_output.append(json_line_rag_review)
+            print("RAG LLM Review Result: ", json_line_rag_review)
+
+        jsonl_rag_review_file_path = OUTPUT_DIR / OUTPUT_FILES_RAG_LLM_REVIEW[0]        
+
+        with open(jsonl_rag_review_file_path, "w", encoding="utf-8") as jsonl_file:
+            for json_line in jsonl_output:
+                jsonl_file.write(json.dumps(json_line, ensure_ascii=False) + "\n")
 
         #rag_review_continuity_detector_rule.ClearCollection()
         # def save_continuity_issues_with_scenes(json_inputs: list, output_path: str) -> None:

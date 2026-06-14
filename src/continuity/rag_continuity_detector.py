@@ -1,12 +1,13 @@
 import json
 import chromadb
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, BitsAndBytesConfig
 import torch
 
 USE_RAG = True
 RAG_CONFIDENCE_THRESHOLD = 0.60
-MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
+#MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
+MODEL_NAME = "./foundation_model/base_llm/llama-3.1-8b-instruct"
 
 PROJECT_ROOT = Path(".")
 JSON_INPUT_DIR = PROJECT_ROOT / "datasets" / "scenes"
@@ -33,9 +34,45 @@ class RagContinuityDetector:
         self.input_file_name = input_jsonl_name
         self.output_file_name = output_jsonl_name
         self.model_name = model_name
+        self.model = None
+        #self.mode_path = MODEL_PATH
+        self._pipeline = None
         #self.client = chromadb.PersistentClient(path="./chroma_db")
         self.client = chromadb.Client()
         self.collection = self.client.get_or_create_collection(name="script_supervisor_scenes")
+
+    def _get_pipeline(self):
+        if self._pipeline is None:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,                 # <-- this is the setting
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True
+                #llm_int8_enable_fp32_cpu_offload=True
+            )
+            tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.model = AutoModelForCausalLM.from_pretrained(self.model_name,
+                                                     quantization_config=bnb_config,
+                                                     device_map="cuda:0",
+                                                     attn_implementation="sdpa")
+
+            self._pipeline = pipeline(
+                "text-generation",
+                model=self.model,
+                tokenizer=tokenizer,
+                max_new_tokens=800,
+                temperature=0.2,
+                do_sample=True,                
+                return_full_text=False,
+                eos_token_id=tokenizer.eos_token_id,
+                pad_token_id=tokenizer.eos_token_id)
+            
+            #self._pipeline = pipeline(
+            #    "text-generation",
+            #    model=self.model,
+            #    tokenizer=tokenizer,
+            #    return_full_text=False)
+        return self._pipeline
   
     def BuildSceneDocumentText(self, scene):
 
@@ -736,7 +773,8 @@ class RagContinuityDetector:
         #                        {previous_scene["documents"]}
         #                        """     
 
-
+        print("\nContinuity Issue Id (In Build Continuity Prompt Method): ", continuity_issue_id)
+        
         prompt = f"""
         You are a movie script supervisor ID.
 
@@ -757,11 +795,30 @@ class RagContinuityDetector:
         RELATED PREVIOUS SCENES:
         {previous_scene_text}
 
+        Return ONLY RFC8259 compliant JSON.
+
         Important rules:
         - Only report an error if there is clear evidence
         - Do not guess.
         - Compare the current scene against previous scenes.
         - Return JSON only.
+        - You are a film script continuity verifier.
+        - Never invent props, wardrobe, locations, or actions.
+        - Evidence must be directly quoted from scene_text.
+        - If the object does not appear in the provided scenes, it does not exist.
+        - If uncertain, return has_error=false.
+        - Use double quotes for every JSON key.
+        - Use double quotes for every string value.
+        - Do not use Python dictionary format.
+        - Do not use single quotes.
+        - Do not include markdown.
+        - Do not include explanation.
+        - Do not include ```json.
+        - The first character must be {{.
+        - The last character must be }}.
+
+        IMPORTANT: The "continuity_issue_id" in your response MUST be exactly: {continuity_issue_id}
+        Do not modify, invent, or normalize any ID fields.
 
         Return this JSON format:
 
@@ -805,30 +862,106 @@ class RagContinuityDetector:
                     "rag_llm_detector"
                 ]
             }}
-        }}
+        }}        
         """                       
-
+        #}}_get_pipeline
+        
         return prompt
 
     def SendPromptToModel(self, prompt):
         model_name = self.model_name
+
+        bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,                 # <-- this is the setting
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True
+                #llm_int8_enable_fp32_cpu_offload=True
+            )
+        
         tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        
-        model = AutoModelForCausalLM.from_pretrained(model_name,
-                                                    device_map="auto",
-                                                    torch_dtype=torch.float)  
+        # tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2")
+        inputs = tokenizer(prompt, return_tensors="pt")
+        print(f"Prompt tokens: {inputs['input_ids'].shape[1]}")
 
-        llm_pipeline = pipeline("text-generation",
-                                model=model,
-                                tokenizer=tokenizer,
-                                max_new_tokens=800,
-                                temperature=0.2,
-                                do_sample=True,
-                                return_full_text=False)
+        # To be uncommented
+        ###############################################################################################
+        #model = AutoModelForCausalLM.from_pretrained(model_name,
+        #                                             quantization_config=bnb_config,
+        #                                             device_map="auto")
+        #                                             torch_dtype=torch.float16)
+        ###############################################################################################
+        # model = AutoModelForCausalLM.from_pretrained(model_name,
+        #                                             quantization_config=bnb_config,
+        #                                             device_map="cuda:0",
+        #                                             attn_implementation="sdpa")
+                                                     #device_map="auto")
+                                                     #max_memory={0: "10GiB", "cpu": "30GiB"})
+                                                     #torch_dtype=torch.float16)
+
+        # import time
+        # inputs_test = tokenizer("Test prompt for speed", return_tensors="pt").to("cuda:0")
+        # start = time.time()
+        # with torch.no_grad():
+        #    outputs = model.generate(**inputs_test, max_new_tokens=50, do_sample=False)
+        # elapsed = time.time() - start
+        # print(f"\nTokens/sec: {(outputs.shape[1] - inputs_test['input_ids'].shape[1]) / elapsed:.1f}", "\n")
+
+        #import time
+        #inputs = tokenizer("Test prompt for speed", return_tensors="pt").to("cuda:0")
+        #start = time.time()
+        #with torch.no_grad():
+        #    outputs = model.generate(**inputs, max_new_tokens=50, do_sample=False)
+        #elapsed = time.time() - start
+        #tokens_generated = outputs.shape[1] - inputs["input_ids"].shape[1]
+        #print(f"Time:       {elapsed:.2f}s")
+        #print(f"Tokens/sec: {tokens_generated / elapsed:.1f}")
+
+
+        
+
+        
+        #print(f"Model name:  {self.model_name}")
+        #print(f"Allocated:   {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
+        #print(f"Reserved:    {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
+        #cpu_count = sum(1 for _, p in model.named_parameters() if p.device.type == "cpu")
+        #gpu_count = sum(1 for _, p in model.named_parameters() if p.device.type != "cpu")
+        #total = cpu_count + gpu_count
+        #print(f"GPU layers:  {gpu_count}/{total} ({gpu_count/total*100:.1f}%)")
+        #print(f"CPU layers:  {cpu_count}/{total} ({cpu_count/total*100:.1f}%)")
+
+        
+        ## To be uncommented
+        ###############################################################################################
+        #llm_pipeline = pipeline("text-generation",
+        #                        model=model,
+        #                        tokenizer=tokenizer,
+        #                        #max_new_tokens=800,
+        #                        max_new_tokens=300,
+        #                        temperature=0.2,
+        #                        do_sample=True,
+        #                        return_full_text=False)
+        ###############################################################################################
+
+        #llm_pipeline = pipeline("text-generation",
+        #                        model=model,
+        #                        tokenizer=tokenizer,
+        #                        return_full_text=False) 
+
+        llm_pipeline = self._get_pipeline()
 
         #return llm_pipeline
+        #output = llm_pipeline(prompt, max_new_tokens=1024, temperature=0.2, do_sample=True)
         output = llm_pipeline(prompt)
+
+        import time
+        inputs_test = tokenizer("Test prompt for speed", return_tensors="pt").to("cuda:0")
+        start = time.time()
+        with torch.no_grad():
+            outputs = self.model.generate(**inputs_test, max_new_tokens=50, do_sample=False)
+        elapsed = time.time() - start
+        print(f"\nTokens/sec: {(outputs.shape[1] - inputs_test['input_ids'].shape[1]) / elapsed:.1f}", "\n")
 
         return output
 
@@ -836,7 +969,8 @@ class RagContinuityDetector:
     def CheckContinuityWithLLM(self, current_scene, collection):
         related_scenes = self.GetStronglyRelatedScenes(current_scene=current_scene,
                                                        collection=collection,
-                                                       top_k=10,
+                                                       top_k=3,
+                                                       #top_k=10,
                                                        #top_k=20,
                                                        max_distance=0.8)
 
@@ -857,18 +991,28 @@ class RagContinuityDetector:
         #output = self.SendPromptToModel(mistral_prompt)[0]["generated_text"]
         output = self.SendPromptToModel(mistral_prompt)
 
-        return output
 
+
+        return output
+        
     def CheckContinuityWithLLM_Review(self, current_scene, prev_scene, continuity_issue_id):
         #def BuildContinuityPromptRAGForRule(self, current_scene, previous_scene, continuity_issue_id):
 
         #print("Current scene in CheckContinuityWithLLM_Review: ", current_scene)
+        print("\nContinuity Issue Id: ", continuity_issue_id, "\n")
+        print("\nCurrent Scene Id: ", current_scene["scene_id"], "\n")
+        print("\nPrevious Scene Id: ", prev_scene["scene_id"], "\n")
         prompt = self.BuildContinuityPromptRAG_ReviewRule(current_scene=current_scene, previous_scene=prev_scene, continuity_issue_id=continuity_issue_id)
 
         mistral_prompt = f"<s>[INST] {prompt} [/INST]"
 
         print("The prompt: ", mistral_prompt, "\n")
         output = self.SendPromptToModel(mistral_prompt)
+
+        # After each inference
+        torch.cuda.empty_cache()
+        import gc
+        gc.collect()
 
         return output
 

@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+outputs/
 .venv/
 venv/
 env/
@@ -23,3 +24,17 @@ reports/
 # OS
 .DS_Store
 Thumbs.db
+
+model/base_llm/
+models/base_llm/
+foundation_model/base_llm/
+
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+
+# HuggingFace cache
+.cache/
+huggingface/

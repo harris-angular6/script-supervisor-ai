@@ -1,5 +1,6 @@
 import json
 import chromadb
+import boto3
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, BitsAndBytesConfig
 import torch

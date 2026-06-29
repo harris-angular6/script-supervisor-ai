@@ -5,6 +5,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, BitsAndB
 from itertools import zip_longest
 import torch
 
+USE_RAG = True
+RAG_CONFIDENCE_THRESHOLD = 0.60
 #MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
 MODEL_NAME = "./foundation_model/base_llm/llama-3.1-8b-instruct"
 USE_4BIT = False
@@ -29,12 +31,12 @@ OUTPUT_FILES_RULE_BASED = [
 ]
 
 #OUTPUT_FILES = [
-#    "train_error_issues_rag_review.jsonl",
+    #"train_error_issues_rag_review.jsonl",
     #"val_error_issues_rag.jsonl",
     #"test_error_scenes_rag.jsonl",
 #]
 
-class RagContinuityDetector:
+class RuleContinuityDetector:
     def __init__(self, input_jsonl_name, output_jsonl_name, model_name):
         self.enabled = USE_RAG
         self.input_file_name = input_jsonl_name

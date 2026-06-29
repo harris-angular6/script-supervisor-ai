@@ -35,6 +35,12 @@ OUTPUT_FILES_RAG_LLM_REVIEW = [
     #"test_error_scenes_rag_review.jsonl",
 ]
 
+OUTPUT_FILES_RULE_RAG_MERGE = [
+    "train_error_issues_rule_rag_merge.jsonl",
+    "val_error_issues_rule_rag_merge.jsonl",
+    "test_error_issues_rule_rag_merge.jsonl",
+]
+
 OUTPUT_FILES = [
     "train_error_issues_rag.jsonl",
     #"val_error_issues_rag.jsonl",
@@ -751,8 +757,8 @@ def process_file(input_path: Path, output_path: Path) -> None:
         script_issues = detect_issues_for_script(scenes)
         all_issues.extend(script_issues)
 
-        if (i >= 10):
-            break;       
+        #if (i >= 10):
+        #    break;       
 
     write_jsonl(output_path, all_issues)
 
@@ -804,23 +810,175 @@ def rule_based_error_rag_llm_review(input_path: Path, output_path: Path, rag_col
         if (i >= 10):
             break;
         
-    write_jsonl(output_path, all_issues)  
+    write_jsonl(output_path, all_issues)
+
+    #import json
+    #from pathlib import Path
+
+def save_results_to_jsonl(all_results: list[str | None], output_path: str) -> None:
+    """Save Llama merge inference results to a JSONL file."""
+    
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    
+    saved = 0
+    failed = 0
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        for i, result in enumerate(all_results):
+            if result is None:
+                print(f"[{i+1}] SKIP — extraction returned None")
+                failed += 1
+                continue
+            try:
+                parsed = json.loads(result)
+                f.write(json.dumps(parsed) + "\n")
+                saved += 1
+            except json.JSONDecodeError as e:
+                print(f"[{i+1}] SKIP — invalid JSON: {e}")
+                print(f"       Raw: {result[:200]}")
+                failed += 1
+
+    #print(f"\nSaved : {saved}")
+    #print(f"Failed: {failed}")
+    #print(f"Output: {output_path}")
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    #breakpoint()
+    
     for filename in INPUT_FILES:
     #for i, filename in enumerate(INPUT_FILES):
         input_path = INPUT_DIR / filename
         output_name = filename.replace("_scenes_enriched.jsonl", "_issues.jsonl")
         output_path = OUTPUT_DIR / output_name
 
+        #breakpoint()
+
         if not input_path.exists():
             print(f"[WARNING] Missing input file: {input_path}")
             continue
 
-        process_file(input_path, output_path)
+        #process_file(input_path, output_path)
 
+        rag_continuity_detector = RagContinuityDetector(input_path, output_path, MODEL_NAME)
+
+        rule_based_issue_file_path = OUTPUT_DIR / "train_error_issues.jsonl"
+        llm_review_issue_file_path = OUTPUT_DIR / "train_error_issues_rag_llm_review.jsonl"
+        
+        issue_detected_rule_based = rag_continuity_detector.LoadDetectedIssuesJsonl(rule_based_issue_file_path)
+        issue_detected_llm_review = rag_continuity_detector.LoadDetectedIssuesJsonl(llm_review_issue_file_path)
+
+
+        #print(issue_detected_rule_based[0])
+        #print(issue_detected_llm_review[0])
+
+        issues_rule_llm_review_merged = []
+
+        tokenizer, model = rag_continuity_detector.Load_llama_Instruct_model(False)
+
+        issue_pairs = []
+
+        for rule_based_issue, llm_review_issue in zip(issue_detected_rule_based, issue_detected_llm_review):
+            if rule_based_issue is not None and llm_review_issue is not None:
+                issue_pairs.append((rule_based_issue, llm_review_issue))
+            elif rule_based_issue is None and llm_review_issue is not None:
+                issue_pairs.append((None, llm_review_issue))
+            elif rule_based_issue is not None and llm_review_issue is None:
+                issue_pairs.append((rule_based_issue, None))
+
+        # 1. Collect all matched pairs
+        '''
+        matched_pairs = [
+            (rule_based_issue, llm_review_issue)
+            for rule_based_issue, llm_review_issue in zip(issue_detected_rule_based, issue_detected_llm_review)
+            if rule_based_issue["continuity_issue_id"] == llm_review_issue["continuity_issue_id"]
+        ]
+        '''
+        # 2. Build all prompts upfront
+        prompts = [
+            rag_continuity_detector.BuildRule_LLM_Merge_Prompt(
+                rule["continuity_issue_id"], rule, llm
+            )
+            for rule, llm in issue_pairs
+            #for rule, llm in matched_pairs
+        ]
+
+        
+        
+        '''
+        prompts = [
+            rag_continuity_detector.BuildRule_LLM_Merge_Prompt(
+                rule["continuity_issue_id"], rule, llm
+            )
+            for rule, llm in issue_pairs
+            #for rule, llm in matched_pairs
+        ]
+        '''
+        # 3. Process in batches
+
+        
+        BATCH_SIZE = 4  # tune upward until VRAM ~12-13GB
+        all_results = []
+        
+        for i in range(0, len(prompts), BATCH_SIZE):
+            batch_prompts = prompts[i:i + BATCH_SIZE]
+            print(f"\nProcessing batch {i // BATCH_SIZE + 1} / {(len(prompts) + BATCH_SIZE - 1) // BATCH_SIZE}")
+            
+            batch_results = rag_continuity_detector.call_llama_batch(batch_prompts, tokenizer, model)
+            #print("\nThe Current Batch Results: ", batch_results)
+
+            for j, result in enumerate(batch_results):
+                global_idx = i + j
+                rule, llm = issue_pairs[global_idx]
+                print(f"\n--- Result {global_idx + 1} ---")
+                print(f"Issue ID : {rule['continuity_issue_id']}")
+                #print(f"Result   : {result}")
+
+                if result is None:
+                    print("Result    : EXTRACTION FAILED")
+                else:
+                    try:
+                        parsed = json.loads(result)
+                        json_result = json.dumps(parsed)
+                        all_results.append(json_result)
+                        #print(f"Result    :   {json.dumps(parsed, indent=2)}")
+                    except json.JSONDecodeError:
+                        print(f"Result    : INVALID JSON - {result[:200]}")
+            
+            #all_results.extend(batch_results)
+            #if i > 16:
+            #    break
+
+        rule_rag_merge_output_file_path = OUTPUT_DIR / OUTPUT_FILES_RULE_RAG_MERGE[0]
+        
+        save_results_to_jsonl(
+            all_results,
+            rule_rag_merge_output_file_path
+        )     
+        
+        # 4. Pair results back with their issue IDs
+        #for (rule, llm), result in zip(matched_pairs, all_results):
+        #########################################################################################################################################
+        #for (rule, llm), result in zip(issue_pairs, all_results):
+        #    print(f"\n{rule['continuity_issue_id']}: {result}")
+        #
+        #########################################################################################################################################
+        '''
+        BATCH_SIZE = 4   # start with 4, increase if VRAM allows
+        
+        for rule_based_issue, llm_review_issue in zip(issue_detected_rule_based, issue_detected_llm_review):
+            if rule_based_issue["continuity_issue_id"] == llm_review_issue["continuity_issue_id"]:
+                merged_continuity_issue_id = rule_based_issue["continuity_issue_id"]                
+                merge_prompt = rag_continuity_detector.BuildRule_LLM_Merge_Prompt(merged_continuity_issue_id, rule_based_issue, llm_review_issue)
+                #tokenizer, model = rag_continuity_detector.Load_llama_Instruct_model(False)
+                print("\nBefore Calling Llama")
+                merged_result = rag_continuity_detector.call_llama(merge_prompt, tokenizer, model)
+                print("\nAfter Calling Llama")
+                print(merged_result)
+        '''     
+        #########################################################################################################################################
+        '''
         input_to_rag_rule = output_path
         output_path_rag_review = OUTPUT_DIR / OUTPUT_FILES_RAG_REVIEW[0] 
         
@@ -832,28 +990,26 @@ def main() -> None:
 
         all_continuity_issues = rag_review_continuity_detector_rule.LoadScenesFromRuleBasedErrorResult(scenes_info=all_rule_based_issues, jsonl_file_path=input_path)
 
-        # print("\nAll Continuity Issues: ", all_continuity_issues, "\n")
         collection = rag_review_continuity_detector_rule.SaveContinuityIssuesToRAGDatabase(all_continuity_issues)
 
-        print("Collection: ", collection)
+        #print("Collection: ", collection)
         results = collection.get()
+        '''
 
         
         
-        for i in range(len(results["ids"])):
-            print("\nContinuity Issue Id: ", results["ids"][i])
-            print("Documents: ", results["documents"][i])
-            print("Metadata: ", results["metadatas"][i])
-            print("\n", "=" * 100)
-        
+        #for i in range(len(results["ids"])):
+        #    print("\nContinuity Issue Id: ", results["ids"][i])
+        #    print("Documents: ", results["documents"][i])
+        #    print("Metadata: ", results["metadatas"][i])
+        #    print("\n", "=" * 100)
+
+
+        '''
         jsonl_output = []
         
         for i in range(len(results["ids"])):
-            #print("\n", "*" * 150)
-            #print("\nContinuity Issue Id: ", results["ids"][i])
-            #print("All Continuity_Issues: ", all_continuity_issues)
-            #print("Collection: ", results)
-            #print("Rag Review Continuity Detector: ", rag_review_continuity_detector_rule)                  
+          
             
             json_line_rag_review = issue_result_rag_llm_review(results["ids"][i], all_continuity_issues, results, rag_review_continuity_detector_rule)
             jsonl_output.append(json_line_rag_review)
@@ -864,6 +1020,7 @@ def main() -> None:
         with open(jsonl_rag_review_file_path, "w", encoding="utf-8") as jsonl_file:
             for json_line in jsonl_output:
                 jsonl_file.write(json.dumps(json_line, ensure_ascii=False) + "\n")
+        '''        
 
         #rag_review_continuity_detector_rule.ClearCollection()
         # def save_continuity_issues_with_scenes(json_inputs: list, output_path: str) -> None:
@@ -962,8 +1119,9 @@ def main() -> None:
         #print("Scenes From Input File:", scenes_from_input_file)
         #print("Collection: ", collection.peek())
         
-        lstResult = []
-        
+        ###################################################
+        # lstResult = []
+        ###################################################
         #for current_scene in scenes_from_input_file:
 
         

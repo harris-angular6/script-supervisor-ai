@@ -16,11 +16,19 @@ LLM_FINETUNED_ERROR = 2
 PROJECT_ROOT = Path(".")
 INPUT_DIR = PROJECT_ROOT / "datasets" / "scenes_enriched_error"
 OUTPUT_DIR = PROJECT_ROOT / "datasets" / "issues_error_rag"
+ENRICHED_INPUT_DIR = PROJECT_ROOT / "datasets" / "scenes_enriched"
+ENRICHED_OUTPUT_DIR = PROJECT_ROOT / "datasets" / "scenes_enriched_labeled"
 
 INPUT_FILES = [
     "train_error_scenes_enriched.jsonl",
     #"val_error_scenes_enriched.jsonl",
     #"test_error_scenes_enriched.jsonl",
+]
+
+ENRICHED_INPUT_FILES = [
+    "train_scenes_enriched.jsonl",
+    #"validation_scenes_enriched.jsonl",
+    #"test_scenes_enriched.jsonl",
 ]
 
 OUTPUT_FILES_RAG_REVIEW = [
@@ -849,6 +857,10 @@ def main() -> None:
     
     for filename in INPUT_FILES:
     #for i, filename in enumerate(INPUT_FILES):
+    #for filename in ENRICHED_INPUT_FILES:
+        #input_path = ENRICHED_INPUT_DIR / filename
+        #output_name = filename.replace(".jsonl", "_rule_based.jsonl")
+        #output_path = ENRICHED_OUTPUT_DIR / output_name
         input_path = INPUT_DIR / filename
         output_name = filename.replace("_scenes_enriched.jsonl", "_issues.jsonl")
         output_path = OUTPUT_DIR / output_name
@@ -863,6 +875,10 @@ def main() -> None:
 
         rag_continuity_detector = RagContinuityDetector(input_path, output_path, MODEL_NAME)
 
+        #rule_based_issue_file_path = ENRICHED_OUTPUT_DIR / "train_error_issues.jsonl"
+        #llm_review_issue_file_path = ENRICHED_OUTPUT_DIR / "train_error_issues_llm_review.jsonl"
+
+        #########################################################################################################        
         rule_based_issue_file_path = OUTPUT_DIR / "train_error_issues.jsonl"
         llm_review_issue_file_path = OUTPUT_DIR / "train_error_issues_rag_llm_review.jsonl"
         

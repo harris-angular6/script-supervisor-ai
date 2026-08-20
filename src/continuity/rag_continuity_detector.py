@@ -5,6 +5,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, BitsAndB
 from itertools import zip_longest
 import torch
 
+USE_RAG = True
 #MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
 MODEL_NAME = "./foundation_model/base_llm/llama-3.1-8b-instruct"
 USE_4BIT = False

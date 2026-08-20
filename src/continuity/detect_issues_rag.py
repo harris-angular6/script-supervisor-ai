@@ -1,3 +1,4 @@
+import os
 import json
 import re
 from pathlib import Path
@@ -934,7 +935,10 @@ def main() -> None:
         # 3. Process in batches
 
         
-        BATCH_SIZE = 4  # tune upward until VRAM ~12-13GB
+        #BATCH_SIZE = 32 # tune upward until VRAM ~12-13GB
+
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        BATCH_SIZE = 8  # test value for A10G
         all_results = []
         
         for i in range(0, len(prompts), BATCH_SIZE):

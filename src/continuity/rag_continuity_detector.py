@@ -485,6 +485,68 @@ class RagContinuityDetector:
                 ]
             }}"""
 
+    def BuildIssue_Rule_LLM_ReviewAgreementPrompt(self, issue_json) -> str:
+        def safe_get(d, *keys, default=""):
+            for key in keys:
+                if d is None or not isinstance(d, dict):
+                    return default
+                d = d.get(key)
+            return d if d is not None else default
+
+        continuity_issue_id = safe_get(issue_json, "continuity_issue_id")
+        current_script_id = safe_get(issue_json, "script_id")
+
+        scene_id = safe_get(issue_json, "detectors", "rule_based", "errors", "scene_id")
+        scene_index = safe_get(issue_json, "detectors", "rule_based", "errors", "scene_index")
+        related_scene_id = safe_get(issue_json, "detectors", "rule_based", "errors", "related_scene_id")
+
+        #print("Scene Id: ", scene_id)
+        #print("\nScene Index: ", scene_index)
+        #print("\nRelated Scene Id: ", related_scene_id)
+
+        return f"""You will receive one json object that contain rule based issue detected and llm review based issue detected. 
+                If the two issues agree, then create single json issue json object that represents the continuity issue agreed by both detectors. 
+                Otherwise, create single json object that represents no issue detected.
+
+                Rules:
+                - If both the issues agree, generate one json ojbect that represents the issue using the template
+                - If both the issues do not agree, generate one json object that states no issue using the template
+                - If neither rule based or llm review found, generate one json object that states no issue using the template
+                - Return ONLY a valid JSON object with no extra text.            
+                - Do NOT write any Python code, functions, or explanations
+                - Do NOT wrap the JSON in markdown backticks
+                - Start your response with {{ and end with }}
+                
+                The json object that contains both issues:
+                {json.dumps(issue_json, indent=2) if issue_json else "null"}
+
+                IMPORTANT:
+                The "continuity_issue_id" in your response MUST be exactly: {continuity_issue_id}
+                The "current_script_id" in your response MUST be exactly: {current_script_id}
+                The "scene_id" in your response MUST be exactly: {scene_id}
+                The "scene_index" in your response MUST be exactly: {scene_index}
+                The "related_scene_id" in your response MUST be exactlyt: {related_scene_id}
+                
+                Do not modify, invent, or normalize any ID fields and Index field.
+    
+                Return this JSON format:
+
+                {{
+                    "continuity_issue_id": {continuity_issue_id},
+                    "script_id": {current_script_id},
+                    "has_continuity_error": true if there is continuity error detected, false otherwise
+
+                    "scene_id": {scene_id}
+                    "scene_index": {scene_index}
+                    "related_scene_id": {related_scene_id}
+                    "issue_type": issue type detected by OpenAI API call, null if no issue detected
+                    "severity": severity level returned by OpenAI API call, null if no issue detected
+                    "description": print description returned by OpenAI API call, null if no issue detected
+                    "confidence": confidence in the final decision, as a number from 0.00 to 1.00
+                                  rounded to two decimal places. If has_continuity_error is false, confidence
+                                  represents confidence that no continuity error exists.
+                }}                
+        """
     
     #def BuildRule_LLM_Merge_Prompt(rule_based_result: dict | None, rule_based_result: dict | None) -> str: 
     def BuildRule_LLM_Merge_Prompt(self, continuity_issue_id, rule_based_result, llm_based_review) -> str:
